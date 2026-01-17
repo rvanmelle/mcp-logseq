@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from . import logseq
 from mcp.types import Tool, TextContent
@@ -486,3 +487,188 @@ class SearchToolHandler(ToolHandler):
                 type="text",
                 text=f"❌ Search failed: {str(e)}"
             )]
+
+
+class InsertBlockToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("insert_block")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description="Insert a new block into LogSeq (page-level or nested).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "parent_block": {
+                        "type": ["string", "null"],
+                        "description": "Parent block UUID or page name (optional for page block inserts)"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Block content"
+                    },
+                    "is_page_block": {
+                        "type": "boolean",
+                        "description": "Insert directly into page",
+                        "default": False
+                    },
+                    "before": {
+                        "type": "boolean",
+                        "description": "Insert before the parent (default false)",
+                        "default": False
+                    },
+                    "custom_uuid": {
+                        "type": ["string", "null"],
+                        "description": "Optional custom UUID for the new block"
+                    }
+                },
+                "required": ["content"]
+            }
+        )
+
+    def run_tool(self, args: dict) -> list[TextContent]:
+        content = args.get("content")
+        if not content:
+            raise RuntimeError("content argument required")
+
+        api = logseq.LogSeq(api_key=api_key)
+        result = api.insert_block(
+            args.get("parent_block"),
+            content,
+            is_page_block=bool(args.get("is_page_block", False)),
+            before=bool(args.get("before", False)),
+            custom_uuid=args.get("custom_uuid"),
+        )
+
+        uuid = None
+        if isinstance(result, dict):
+            uuid = result.get("uuid") or result.get("id")
+        elif isinstance(result, str):
+            uuid = result
+
+        message_lines = ["✅ Block inserted"]
+        if uuid:
+            message_lines.append(f"UUID: {uuid}")
+        else:
+            message_lines.append(f"Response: {result}")
+
+        return [TextContent(type="text", text="\n".join(message_lines))]
+
+
+class UpdateBlockToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("update_block")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description="Update the content of an existing block.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "block_uuid": {
+                        "type": "string",
+                        "description": "UUID of the block to update"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "New block content"
+                    },
+                    "pos": {
+                        "type": "integer",
+                        "description": "Optional cursor position"
+                    }
+                },
+                "required": ["block_uuid", "content"]
+            }
+        )
+
+    def run_tool(self, args: dict) -> list[TextContent]:
+        block_uuid = args.get("block_uuid")
+        content = args.get("content")
+        if not block_uuid or content is None:
+            raise RuntimeError("block_uuid and content arguments required")
+
+        api = logseq.LogSeq(api_key=api_key)
+        result = api.update_block(block_uuid, content, pos=args.get("pos"))
+
+        return [TextContent(
+            type="text",
+            text=f"✅ Updated block {block_uuid}\nResponse: {result}"
+        )]
+
+
+class DeleteBlockToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("delete_block")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description="Delete a block by UUID.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "block_uuid": {
+                        "type": "string",
+                        "description": "UUID of the block to delete"
+                    }
+                },
+                "required": ["block_uuid"]
+            }
+        )
+
+    def run_tool(self, args: dict) -> list[TextContent]:
+        block_uuid = args.get("block_uuid")
+        if not block_uuid:
+            raise RuntimeError("block_uuid argument required")
+
+        api = logseq.LogSeq(api_key=api_key)
+        result = api.delete_block(block_uuid)
+
+        return [TextContent(
+            type="text",
+            text=f"✅ Deleted block {block_uuid}\nResponse: {result}"
+        )]
+
+
+class GetBlockToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("get_block")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description="Retrieve a block by UUID (optionally with children).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "block_uuid": {
+                        "type": "string",
+                        "description": "UUID of the block"
+                    },
+                    "include_children": {
+                        "type": "boolean",
+                        "description": "Include child blocks in response",
+                        "default": False
+                    }
+                },
+                "required": ["block_uuid"]
+            }
+        )
+
+    def run_tool(self, args: dict) -> list[TextContent]:
+        block_uuid = args.get("block_uuid")
+        if not block_uuid:
+            raise RuntimeError("block_uuid argument required")
+
+        api = logseq.LogSeq(api_key=api_key)
+        result = api.get_block(block_uuid, include_children=bool(args.get("include_children", False)))
+
+        try:
+            formatted = json.dumps(result, indent=2, ensure_ascii=False)
+        except Exception:
+            formatted = str(result)
+
+        return [TextContent(type="text", text=formatted)]

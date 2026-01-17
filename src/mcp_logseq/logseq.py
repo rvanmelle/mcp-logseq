@@ -185,7 +185,7 @@ class LogSeq():
         """Delete a LogSeq page by name."""
         url = self.get_base_url()
         logger.info(f"Deleting page '{page_name}'")
-        
+
         try:
             # Pre-delete validation: verify page exists
             existing_pages = self.list_pages()
@@ -294,4 +294,132 @@ class LogSeq():
             raise
         except Exception as e:
             logger.error(f"Error updating page '{page_name}': {str(e)}")
+            raise
+
+    # ------------------------------------------------------------------
+    # Block-level operations
+
+    def insert_block(
+        self,
+        parent_block: str | None,
+        content: str,
+        *,
+        is_page_block: bool = False,
+        before: bool = False,
+        custom_uuid: str | None = None,
+    ) -> Any:
+        """Insert a new block via logseq.Editor.insertBlock."""
+
+        url = self.get_base_url()
+        logger.info(
+            "Inserting block under %s (is_page_block=%s, before=%s)",
+            parent_block,
+            is_page_block,
+            before,
+        )
+
+        options = {
+            "isPageBlock": is_page_block,
+            "before": before,
+            "customUUID": custom_uuid,
+        }
+
+        try:
+            response = requests.post(
+                url,
+                headers=self._get_headers(),
+                json={
+                    "method": "logseq.Editor.insertBlock",
+                    "args": [parent_block, content, options],
+                },
+                verify=self.verify_ssl,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            result = response.json()
+            logger.debug("insert_block result: %s", result)
+            return result
+        except Exception as e:
+            logger.error("Error inserting block: %s", str(e))
+            raise
+
+    def update_block(self, block_uuid: str, content: str, pos: int | None = None) -> Any:
+        """Update an existing block via logseq.Editor.updateBlock."""
+
+        url = self.get_base_url()
+        logger.info("Updating block %s", block_uuid)
+
+        payload = {"content": content}
+        if pos is not None:
+            payload["pos"] = pos
+
+        try:
+            response = requests.post(
+                url,
+                headers=self._get_headers(),
+                json={
+                    "method": "logseq.Editor.updateBlock",
+                    "args": [block_uuid, payload],
+                },
+                verify=self.verify_ssl,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            result = response.json()
+            logger.debug("update_block result: %s", result)
+            return result
+        except Exception as e:
+            logger.error("Error updating block %s: %s", block_uuid, str(e))
+            raise
+
+    def delete_block(self, block_uuid: str) -> Any:
+        """Delete a block via logseq.Editor.removeBlock."""
+
+        url = self.get_base_url()
+        logger.info("Removing block %s", block_uuid)
+
+        try:
+            response = requests.post(
+                url,
+                headers=self._get_headers(),
+                json={
+                    "method": "logseq.Editor.removeBlock",
+                    "args": [block_uuid],
+                },
+                verify=self.verify_ssl,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            result = response.json()
+            logger.debug("delete_block result: %s", result)
+            return result
+        except Exception as e:
+            logger.error("Error deleting block %s: %s", block_uuid, str(e))
+            raise
+
+    def get_block(self, block_uuid: str, include_children: bool = False) -> Any:
+        """Fetch block details via logseq.Editor.getBlock."""
+
+        url = self.get_base_url()
+        logger.info(
+            "Fetching block %s (include_children=%s)", block_uuid, include_children
+        )
+
+        try:
+            response = requests.post(
+                url,
+                headers=self._get_headers(),
+                json={
+                    "method": "logseq.Editor.getBlock",
+                    "args": [block_uuid, {"includeChildren": include_children}],
+                },
+                verify=self.verify_ssl,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            result = response.json()
+            logger.debug("get_block result: %s", result)
+            return result
+        except Exception as e:
+            logger.error("Error fetching block %s: %s", block_uuid, str(e))
             raise
