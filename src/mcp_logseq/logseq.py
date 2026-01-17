@@ -1,6 +1,6 @@
 import requests
 import logging
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("mcp-logseq")
 
@@ -423,3 +423,117 @@ class LogSeq():
         except Exception as e:
             logger.error("Error fetching block %s: %s", block_uuid, str(e))
             raise
+
+    # ------------------------------------------------------------------
+    # Higher-level helpers for batch operations
+
+    def _extract_block_uuid(self, result: Any) -> Optional[str]:
+        """Best-effort attempt to derive a block UUID from various API responses."""
+
+        if isinstance(result, str):
+            return result
+
+        if isinstance(result, dict):
+            for key in ("uuid", "id"):
+                value = result.get(key)
+                if isinstance(value, str):
+                    return value
+
+            block = result.get("block")
+            if isinstance(block, dict):
+                for key in ("uuid", "id"):
+                    value = block.get(key)
+                    if isinstance(value, str):
+                        return value
+
+        return None
+
+    def _get_children_tree(self, parent: str, *, is_page: bool) -> List[Dict[str, Any]]:
+        """Return the children tree for a page or block."""
+
+        url = self.get_base_url()
+        method = "logseq.Editor.getPageBlocksTree" if is_page else "logseq.Editor.getBlockChildrenTree"
+
+        response = requests.post(
+            url,
+            headers=self._get_headers(),
+            json={"method": method, "args": [parent]},
+            verify=self.verify_ssl,
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        tree = response.json()
+
+        if not tree:
+            return []
+
+        if isinstance(tree, dict):
+            return tree.get("children", []) or []
+
+        if isinstance(tree, list):
+            return tree
+
+        logger.warning("Unexpected children payload for parent %s: %r", parent, tree)
+        return []
+
+    def _insert_block_tree(
+        self,
+        parent: str,
+        block_data: Dict[str, Any],
+        *,
+        is_page_block: bool,
+    ) -> Optional[str]:
+        """Insert a block (and its subtree) under the given parent."""
+
+        if "content" not in block_data:
+            raise ValueError("Each block definition must include a 'content' field.")
+
+        result = self.insert_block(
+            parent,
+            block_data["content"],
+            is_page_block=is_page_block,
+            custom_uuid=block_data.get("custom_uuid"),
+        )
+
+        new_uuid = self._extract_block_uuid(result)
+        if new_uuid is None:
+            logger.warning("Could not determine UUID for inserted block under %s", parent)
+            return None
+
+        for child in block_data.get("children", []) or []:
+            self._insert_block_tree(new_uuid, child, is_page_block=False)
+
+        return new_uuid
+
+    def replace_children(
+        self,
+        parent: str,
+        blocks: List[Dict[str, Any]],
+        *,
+        is_page: bool = False,
+        delete_existing: bool = True,
+    ) -> List[str]:
+        """Replace the children of a page or block with a provided block tree."""
+
+        logger.info(
+            "Replacing children under %s (is_page=%s, delete_existing=%s)",
+            parent,
+            is_page,
+            delete_existing,
+        )
+
+        inserted: List[str] = []
+
+        if delete_existing:
+            existing_children = self._get_children_tree(parent, is_page=is_page)
+            for child in reversed(existing_children):
+                uuid = child.get("uuid")
+                if isinstance(uuid, str):
+                    self.delete_block(uuid)
+
+        for block in blocks:
+            new_uuid = self._insert_block_tree(parent, block, is_page_block=is_page)
+            if new_uuid:
+                inserted.append(new_uuid)
+
+        return inserted

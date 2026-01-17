@@ -672,3 +672,86 @@ class GetBlockToolHandler(ToolHandler):
             formatted = str(result)
 
         return [TextContent(type="text", text=formatted)]
+
+
+class ReplaceChildrenToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("replace_children")
+
+    def get_tool_description(self):
+        block_schema = {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "Block content in Markdown"
+                },
+                "children": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/block"},
+                    "description": "Optional child blocks to nest under this block"
+                },
+                "custom_uuid": {
+                    "type": "string",
+                    "description": "Optional UUID to assign to this block"
+                }
+            },
+            "required": ["content"]
+        }
+
+        return Tool(
+            name=self.name,
+            description="Replace the children of a page or block with a provided block hierarchy.",
+            inputSchema={
+                "type": "object",
+                "definitions": {"block": block_schema},
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Page name or block UUID whose children should be replaced"
+                    },
+                    "is_page": {
+                        "type": "boolean",
+                        "description": "Treat target as a page name (true for page-level operations)",
+                        "default": False
+                    },
+                    "blocks": {
+                        "type": "array",
+                        "items": {"$ref": "#/definitions/block"},
+                        "description": "New block hierarchy to insert"
+                    },
+                    "delete_existing": {
+                        "type": "boolean",
+                        "description": "Delete existing children before inserting the new tree",
+                        "default": True
+                    }
+                },
+                "required": ["target", "blocks"]
+            }
+        )
+
+    def run_tool(self, args: dict) -> list[TextContent]:
+        target = args.get("target")
+        blocks = args.get("blocks")
+
+        if not target:
+            raise RuntimeError("target argument required")
+        if not isinstance(blocks, list):
+            raise RuntimeError("blocks argument must be an array")
+
+        api = logseq.LogSeq(api_key=api_key)
+        inserted = api.replace_children(
+            parent=target,
+            blocks=blocks,
+            is_page=bool(args.get("is_page", False)),
+            delete_existing=bool(args.get("delete_existing", True)),
+        )
+
+        summary = [
+            f"✅ Replaced children under {target}",
+            f"Inserted blocks: {len(inserted)}",
+        ]
+        if inserted:
+            summary.append(f"First inserted UUID: {inserted[0]}")
+
+        return [TextContent(type="text", text="\n".join(summary))]

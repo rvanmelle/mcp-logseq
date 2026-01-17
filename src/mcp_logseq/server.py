@@ -82,6 +82,7 @@ add_tool_handler(tools.InsertBlockToolHandler())
 add_tool_handler(tools.UpdateBlockToolHandler())
 add_tool_handler(tools.DeleteBlockToolHandler())
 add_tool_handler(tools.GetBlockToolHandler())
+add_tool_handler(tools.ReplaceChildrenToolHandler())
 logger.info("Tool handlers registration complete")
 
 @app.list_tools()
